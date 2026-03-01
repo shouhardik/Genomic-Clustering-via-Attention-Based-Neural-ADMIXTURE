@@ -2,7 +2,7 @@
 Data loading and preprocessing utilities for Neural ADMIXTURE.
 
 Supports:
-  - VCF file parsing (via cyvcf2)
+  - VCF file parsing (via cyvcf2 or scikit-allel as fallback on Windows)
   - PLINK binary .bed/.bim/.fam loading (via pandas-plink)
   - LD pruning (sliding-window pairwise r² filtering)
   - Stratified train/test splitting
@@ -19,36 +19,16 @@ from sklearn.model_selection import train_test_split
 # VCF loading
 # ---------------------------------------------------------------------------
 
-def load_vcf(
-    vcf_path: Union[str, Path],
-    max_snps: Optional[int] = None,
-    maf_threshold: float = 0.01,
+def _load_vcf_cyvcf2(
+    vcf_path: str,
+    max_snps: Optional[int],
+    maf_threshold: float,
 ) -> Tuple[np.ndarray, List[str], List[str]]:
-    """
-    Load a VCF file into a genotype matrix.
+    """Load VCF using cyvcf2 (fast, C-based; requires htslib)."""
+    from cyvcf2 import VCF
 
-    Parameters
-    ----------
-    vcf_path : path to a (optionally gzipped) VCF file.
-    max_snps : cap on the number of SNPs to load (None = all).
-    maf_threshold : discard SNPs with minor allele frequency below this.
-
-    Returns
-    -------
-    X : (N, M) float32 array with values in {0, 0.5, 1}.
-    sample_ids : list of sample identifiers.
-    snp_ids : list of SNP identifiers ("chrom:pos:ref:alt").
-    """
-    try:
-        from cyvcf2 import VCF
-    except ImportError:
-        raise ImportError(
-            "cyvcf2 is required for VCF loading. Install with: pip install cyvcf2"
-        )
-
-    vcf = VCF(str(vcf_path))
+    vcf = VCF(vcf_path)
     sample_ids = list(vcf.samples)
-    n_samples = len(sample_ids)
 
     genotypes: List[np.ndarray] = []
     snp_ids: List[str] = []
@@ -66,14 +46,116 @@ def load_vcf(
             continue
 
         genotypes.append(dosage / 2.0)
-        snp_ids.append(f"{variant.CHROM}:{variant.POS}:{variant.REF}:{variant.ALT[0]}")
+        snp_ids.append(
+            f"{variant.CHROM}:{variant.POS}:{variant.REF}:{variant.ALT[0]}"
+        )
 
         if max_snps is not None and len(genotypes) >= max_snps:
             break
 
     vcf.close()
+    X = np.column_stack(genotypes)
+    return X, sample_ids, snp_ids
+
+
+def _load_vcf_allel(
+    vcf_path: str,
+    max_snps: Optional[int],
+    maf_threshold: float,
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """Load VCF using scikit-allel (pure-Python parser; works on Windows)."""
+    import allel
+
+    fields = ["samples", "calldata/GT", "variants/CHROM",
+              "variants/POS", "variants/REF", "variants/ALT",
+              "variants/is_snp"]
+    data = allel.read_vcf(vcf_path, fields=fields)
+
+    if data is None:
+        raise RuntimeError(f"scikit-allel could not read VCF: {vcf_path}")
+
+    sample_ids = list(data["samples"])
+    gt = data["calldata/GT"]          # (n_variants, n_samples, ploidy)
+    is_snp = data["variants/is_snp"]
+    chroms = data["variants/CHROM"]
+    positions = data["variants/POS"]
+    refs = data["variants/REF"]
+    alts = data["variants/ALT"][:, 0]  # first ALT allele
+
+    genotypes: List[np.ndarray] = []
+    snp_ids: List[str] = []
+
+    for i in range(gt.shape[0]):
+        if not is_snp[i]:
+            continue
+        alleles = gt[i, :, :]                       # (n_samples, ploidy)
+        dosage = alleles.sum(axis=1).astype(np.float32)
+        dosage[dosage < 0] = np.nan
+
+        af = np.nanmean(dosage) / 2.0
+        maf = min(af, 1.0 - af)
+        if maf < maf_threshold:
+            continue
+
+        genotypes.append(dosage / 2.0)
+        snp_ids.append(f"{chroms[i]}:{positions[i]}:{refs[i]}:{alts[i]}")
+
+        if max_snps is not None and len(genotypes) >= max_snps:
+            break
 
     X = np.column_stack(genotypes)
+    return X, sample_ids, snp_ids
+
+
+def load_vcf(
+    vcf_path: Union[str, Path],
+    max_snps: Optional[int] = None,
+    maf_threshold: float = 0.01,
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """
+    Load a VCF file into a genotype matrix.
+
+    Tries **cyvcf2** first (fast, C-based). If unavailable (e.g. on Windows
+    where htslib is hard to build), falls back to **scikit-allel** which
+    ships a pure-Python VCF parser.
+
+    Parameters
+    ----------
+    vcf_path : path to a (optionally gzipped) VCF file.
+    max_snps : cap on the number of SNPs to load (None = all).
+    maf_threshold : discard SNPs with minor allele frequency below this.
+
+    Returns
+    -------
+    X : (N, M) float32 array with values in {0, 0.5, 1}.
+    sample_ids : list of sample identifiers.
+    snp_ids : list of SNP identifiers ("chrom:pos:ref:alt").
+    """
+    vcf_path = str(vcf_path)
+
+    # --- try cyvcf2 first (fast, C-based) --------------------------------
+    try:
+        from cyvcf2 import VCF as _VCF          # noqa: F401
+        X, sample_ids, snp_ids = _load_vcf_cyvcf2(
+            vcf_path, max_snps, maf_threshold
+        )
+    except ImportError:
+        # --- fallback to scikit-allel ------------------------------------
+        try:
+            import allel as _allel               # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "Neither cyvcf2 nor scikit-allel is installed.\n"
+                "  • Linux / macOS  →  pip install cyvcf2\n"
+                "  • Windows        →  pip install scikit-allel\n"
+                "At least one is required for VCF loading."
+            )
+        print("[INFO] cyvcf2 not available – using scikit-allel fallback")
+        X, sample_ids, snp_ids = _load_vcf_allel(
+            vcf_path, max_snps, maf_threshold
+        )
+
+    # --- impute missing values -------------------------------------------
     nan_mask = np.isnan(X)
     if nan_mask.any():
         col_means = np.nanmean(X, axis=0)

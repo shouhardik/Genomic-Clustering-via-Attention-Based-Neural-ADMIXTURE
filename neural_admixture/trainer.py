@@ -1,5 +1,5 @@
 """
-Training loop for Neural ADMIXTURE (single-head and multi-head).
+Training loop for Neural ADMIXTURE.
 
 Handles:
   - Mini-batch training with Adam optimizer
@@ -15,13 +15,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 from tqdm import tqdm
 
-from .model import NeuralADMIXTURE, MultiHeadNeuralADMIXTURE
+from .model import NeuralADMIXTURE
 from .losses import (
     single_head_loss,
-    multi_head_loss,
     rmse_Q,
     rmse_F,
     delta_metric,
@@ -32,11 +31,11 @@ from .initialization import pck_means_init
 
 class Trainer:
     """
-    Trainer for single-head or multi-head Neural ADMIXTURE.
+    Trainer for Neural ADMIXTURE.
 
     Parameters
     ----------
-    model : NeuralADMIXTURE or MultiHeadNeuralADMIXTURE
+    model : NeuralADMIXTURE
     lr : learning rate (default 1e-3)
     lam : L2 regularization strength λ (default 0)
     batch_size : mini-batch size (default 256)
@@ -45,7 +44,7 @@ class Trainer:
 
     def __init__(
         self,
-        model: Union[NeuralADMIXTURE, MultiHeadNeuralADMIXTURE],
+        model: NeuralADMIXTURE,
         lr: float = 1e-3,
         lam: float = 0.0,
         batch_size: int = 256,
@@ -63,7 +62,6 @@ class Trainer:
         self.model = model.to(self.device)
         self.lam = lam
         self.batch_size = batch_size
-        self.multi_head = isinstance(model, MultiHeadNeuralADMIXTURE)
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.history: List[Dict[str, float]] = []
@@ -85,16 +83,11 @@ class Trainer:
         n_pca_components: int = 20,
         random_state: int = 42,
     ):
-        """Run PCK-means and load the resulting F into each decoder."""
-        if self.multi_head:
-            for i, k in enumerate(self.model.k_values):
-                F_init = pck_means_init(X_train, k, n_pca_components, random_state)
-                self.model.init_decoder(i, F_init.to(self.device))
-        else:
-            F_init = pck_means_init(
-                X_train, self.model.k, n_pca_components, random_state
-            )
-            self.model.init_decoder(F_init.to(self.device))
+        """Run PCK-means and load the resulting F into the decoder."""
+        F_init = pck_means_init(
+            X_train, self.model.k, n_pca_components, random_state
+        )
+        self.model.init_decoder(F_init.to(self.device))
 
     # ------------------------------------------------------------------
     # Training
@@ -136,12 +129,8 @@ class Trainer:
                 batch_x = batch_x.to(self.device)
                 self.optimizer.zero_grad()
 
-                if self.multi_head:
-                    x_hats, qs = self.model(batch_x)
-                    loss = multi_head_loss(batch_x, x_hats, self.model, self.lam)
-                else:
-                    x_hat, q = self.model(batch_x)
-                    loss = single_head_loss(batch_x, x_hat, self.model, self.lam)
+                x_hat, q = self.model(batch_x)
+                loss = single_head_loss(batch_x, x_hat, self.model, self.lam)
 
                 loss.backward()
                 self.optimizer.step()
@@ -178,12 +167,8 @@ class Trainer:
         n = 0
         for (batch_x,) in loader:
             batch_x = batch_x.to(self.device)
-            if self.multi_head:
-                x_hats, _ = self.model(batch_x)
-                loss = multi_head_loss(batch_x, x_hats, self.model, lam=0.0)
-            else:
-                x_hat, _ = self.model(batch_x)
-                loss = single_head_loss(batch_x, x_hat, self.model, lam=0.0)
+            x_hat, _ = self.model(batch_x)
+            loss = single_head_loss(batch_x, x_hat, self.model, lam=0.0)
             total_loss += loss.item()
             n += 1
         return total_loss / n
@@ -197,22 +182,12 @@ class Trainer:
         self,
         X: np.ndarray,
         temperature: float = 1.0,
-    ) -> Union[np.ndarray, List[np.ndarray]]:
-        """
-        Produce ancestry assignments Q for (possibly unseen) data.
-
-        Returns a single (N, K) array for single-head,
-        or a list of arrays for multi-head.
-        """
+    ) -> np.ndarray:
+        """Produce ancestry assignments Q (N, K) for (possibly unseen) data."""
         self.model.eval()
         tensor = torch.from_numpy(X.astype(np.float32)).to(self.device)
-
-        if self.multi_head:
-            qs = self.model.encode(tensor, temperature)
-            return [q.cpu().numpy() for q in qs]
-        else:
-            q = self.model.encode(tensor, temperature)
-            return q.cpu().numpy()
+        q = self.model.encode(tensor, temperature)
+        return q.cpu().numpy()
 
     # ------------------------------------------------------------------
     # Evaluation against ground truth
@@ -225,7 +200,6 @@ class Trainer:
         Q_gt: Optional[np.ndarray] = None,
         F_gt: Optional[np.ndarray] = None,
         temperature: float = 1.0,
-        head_idx: int = 0,
         align: bool = True,
     ) -> Dict[str, float]:
         """
@@ -237,19 +211,13 @@ class Trainer:
         Q_gt : ground-truth ancestry proportions (N, K)
         F_gt : ground-truth allele frequencies (K, M)
         temperature : softmax temperature for inference
-        head_idx : which head to evaluate (multi-head only)
         align : if True, apply permutation alignment before computing metrics
         """
         self.model.eval()
         tensor = torch.from_numpy(X.astype(np.float32)).to(self.device)
 
-        if self.multi_head:
-            qs = self.model.encode(tensor, temperature)
-            Q_est_t = qs[head_idx]
-            F_est_t = self.model.get_F(head_idx).to(self.device)
-        else:
-            Q_est_t = self.model.encode(tensor, temperature)
-            F_est_t = self.model.get_F().to(self.device)
+        Q_est_t = self.model.encode(tensor, temperature)
+        F_est_t = self.model.get_F().to(self.device)
 
         Q_est_np = Q_est_t.cpu().numpy()
         F_est_np = F_est_t.cpu().numpy()
@@ -285,20 +253,11 @@ class Trainer:
         The checkpoint includes enough information to reconstruct the model
         architecture and resume training or run inference on new data.
         """
-        if self.multi_head:
-            model_config = {
-                "type": "multi_head",
-                "n_snps": self.model.n_snps,
-                "k_values": self.model.k_values,
-                "hidden_dim": self.model.hidden_dim,
-            }
-        else:
-            model_config = {
-                "type": "single_head",
-                "n_snps": self.model.n_snps,
-                "k": self.model.k,
-                "hidden_dim": self.model.hidden_dim,
-            }
+        model_config = {
+            "n_snps": self.model.n_snps,
+            "k": self.model.k,
+            "hidden_dim": self.model.hidden_dim,
+        }
 
         checkpoint = {
             "model_config": model_config,
@@ -332,18 +291,11 @@ class Trainer:
         checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
         config = checkpoint["model_config"]
 
-        if config["type"] == "multi_head":
-            model = MultiHeadNeuralADMIXTURE(
-                n_snps=config["n_snps"],
-                k_values=config["k_values"],
-                hidden_dim=config["hidden_dim"],
-            )
-        else:
-            model = NeuralADMIXTURE(
-                n_snps=config["n_snps"],
-                k=config["k"],
-                hidden_dim=config["hidden_dim"],
-            )
+        model = NeuralADMIXTURE(
+            n_snps=config["n_snps"],
+            k=config["k"],
+            hidden_dim=config["hidden_dim"],
+        )
 
         model.load_state_dict(checkpoint["model_state_dict"])
 
