@@ -335,6 +335,57 @@ Dataset              Device     Train Time     Peak Mem (MB)
 
 ---
 
+Classical ADMIXTURE Benchmark (chr22, K = 5)
+
+To compare against the original EM-based ADMIXTURE algorithm
+(Alexander et al., 2009), we reproduced the same preprocessing pipeline:
+
+MAF ≥ 0.05
+
+First 10 000 SNPs selected
+
+LD pruning: --indep-pairwise 50 10 0.2
+
+Final SNPs after pruning: 1177
+
+Samples: 2504
+
+K = 5
+
+ADMIXTURE Runtime
+Dataset              Device     Train Time
+------------------------------------------
+1000 Genomes (chr22) cpu        00:00:44
+Converged in 39 iterations
+Loglikelihood: -2600071.208103
+CV error (K=5): 0.45313
+Evaluation (Permutation-Aligned Q)
+
+Cluster order was aligned to ground-truth super-populations using the Hungarian algorithm.
+
+Metric
+----------------
+RMSE(Q):  0.4438
+Delta(Q): 0.2688
+Neural vs Classical Summary (chr22, K = 5)
+Method                   Train Time    RMSE(Q)    Delta(Q)
+-----------------------------------------------------------
+Classical ADMIXTURE      ~44 s         0.444      0.269
+Neural ADMIXTURE (CPU)   ~6 s          0.331      0.120
+Neural ADMIXTURE (GPU)   ~3 s          0.331      0.120
+
+Key Observations:
+
+Neural ADMIXTURE provides ~10–15× faster training when GPU acceleration is available.
+
+Neural ADMIXTURE achieves lower RMSE(Q) and Delta(Q).
+
+Both methods recover meaningful population structure.
+
+Neural ADMIXTURE preserves interpretability while offering substantial computational speedups.
+
+
+
 ## Model Saving and Loading
 
 ```python
