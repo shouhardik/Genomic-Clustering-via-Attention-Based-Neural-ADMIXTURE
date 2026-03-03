@@ -93,9 +93,6 @@ pip install -r requirements.txt
 | `pandas-plink >= 2.2` | PLINK binary file loading |
 | `jupyter >= 1.0` | Notebook environment |
 
-> **Windows note:** `cyvcf2` depends on `htslib` and does not build on Windows.
-> The library detects this automatically and falls back to `scikit-allel`.
-
 
 ## Quick Start
 
@@ -184,7 +181,7 @@ skip training and jump straight to evaluation or visualisation.
 
 ## Sample Results (K = 5, chr22)
 
-The outputs below are from a full run of the notebook on Windows 11 with
+The outputs below are from a full run of the notebook with
 PyTorch 2.5.1 + CUDA 12.1.
 
 ### Data loading
@@ -255,10 +252,10 @@ is arbitrary). Alignment is performed automatically via exhaustive search
 
 | Metric | Formula | Description |
 |---|---|---|
-| **RMSE(Q)** | \(\frac{1}{\sqrt{NK}} \lVert \hat{Q} - Q_{gt} \rVert_F\) | Per-element RMS error of ancestry proportions |
-| **RMSE(F)** | \(\frac{1}{\sqrt{KM}} \lVert \hat{F} - F_{gt} \rVert_F\) | Per-element RMS error of allele frequencies |
-| **Δ(Q)** | \(\frac{1}{N^2} \lVert \hat{Q}\hat{Q}^T - Q_{gt}Q_{gt}^T \rVert_F^2\) | Permutation-invariant covariance agreement |
-| **Recon. loss** | BCE(x, x̃) | Binary cross-entropy (always available) |
+| **RMSE(Q)** | $\frac{1}{\sqrt{NK}} \lVert \hat{Q} - Q_{gt} \rVert_F$ | Per-element RMS error of ancestry proportions |
+| **RMSE(F)** | $\frac{1}{\sqrt{KM}} \lVert \hat{F} - F_{gt} \rVert_F$ | Per-element RMS error of allele frequencies |
+| **Δ(Q)** | $\frac{1}{N^2} \lVert \hat{Q}\hat{Q}^T - Q_{gt}Q_{gt}^T \rVert_F^2$ | Permutation-invariant covariance agreement |
+| **Recon. loss** | $\text{BCE}(x, \tilde{x})$ | Binary cross-entropy (always available) |
 
 **Results on 1000 Genomes chr22 (K = 5, 50 epochs):**
 
@@ -311,7 +308,7 @@ device (CPU and CUDA/MPS if present):
 | **Inference latency** | Time for a single forward pass (`predict`) on the test set | 
 
 
-**Results on 1000 Genomes chr22 (K = 5, 50 epochs, Windows 11):**
+**Results on 1000 Genomes chr22 (K = 5, 50 epochs):**
 
 ```
 Dataset              Device     Train Time     Peak Mem (MB)
