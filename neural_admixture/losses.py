@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from itertools import permutations
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -61,23 +61,6 @@ def single_head_loss(
     if lam > 0:
         loss = loss + lam * encoder_l2_penalty(model)
     return loss
-
-
-def multi_head_loss(
-    x: torch.Tensor,
-    x_hats: List[torch.Tensor],
-    model: nn.Module,
-    lam: float = 0.0,
-) -> torch.Tensor:
-    """
-    L_MNA = Σ_h L_N(Q_Kh, F_Kh)   (Eq. 4)
-    """
-    total = torch.tensor(0.0, device=x.device)
-    for x_hat in x_hats:
-        total = total + bce_loss(x, x_hat)
-    if lam > 0:
-        total = total + lam * encoder_l2_penalty(model)
-    return total
 
 
 # ---------------------------------------------------------------------------

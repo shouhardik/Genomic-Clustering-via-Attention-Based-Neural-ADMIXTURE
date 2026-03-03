@@ -1,4 +1,4 @@
-from .model import NeuralADMIXTURE, MultiHeadNeuralADMIXTURE
+from .model import NeuralADMIXTURE
 from .trainer import Trainer
 from .initialization import pck_means_init
 from .losses import permutation_align
@@ -15,7 +15,7 @@ from .data import (
 from .visualization import (
     plot_pca_with_centroids,
     plot_admixture_barplot,
-    plot_multihead_barplots,
+    plot_ancestry_heatmap,
     plot_training_history,
 )
 from .benchmark import (
@@ -28,7 +28,6 @@ from .benchmark import (
 
 __all__ = [
     "NeuralADMIXTURE",
-    "MultiHeadNeuralADMIXTURE",
     "Trainer",
     "pck_means_init",
     "permutation_align",
@@ -42,7 +41,7 @@ __all__ = [
     "SUPERPOP_MAP_1KG",
     "plot_pca_with_centroids",
     "plot_admixture_barplot",
-    "plot_multihead_barplots",
+    "plot_ancestry_heatmap",
     "plot_training_history",
     "timer",
     "track_memory",

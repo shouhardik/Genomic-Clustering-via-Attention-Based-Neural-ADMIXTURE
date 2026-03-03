@@ -5,14 +5,13 @@ Implements the autoencoder described in:
   Dominguez Mantes et al., "Neural ADMIXTURE for rapid genomic clustering",
   Nature Computational Science, 2023.
 
-Single-head: one encoder → one (K)-dim bottleneck → one decoder
-Multi-head:  shared encoder → H bottlenecks (K1…KH) → H decoders
+Architecture: encoder → K-dim bottleneck (softmax) → linear decoder
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Optional, Tuple, Union
+from typing import Tuple
 
 
 class Encoder(nn.Module):
@@ -72,12 +71,12 @@ class Decoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Single-Head Neural ADMIXTURE
+# Neural ADMIXTURE
 # ---------------------------------------------------------------------------
 
 class NeuralADMIXTURE(nn.Module):
     """
-    Single-head Neural ADMIXTURE.
+    Neural ADMIXTURE autoencoder.
 
     Architecture
     ------------
@@ -146,90 +145,3 @@ class NeuralADMIXTURE(nn.Module):
         with torch.no_grad():
             self.decoder.linear.weight.copy_(F_init.T)
             self.decoder.clamp_weights()
-
-
-# ---------------------------------------------------------------------------
-# Multi-Head Neural ADMIXTURE
-# ---------------------------------------------------------------------------
-
-class MultiHeadNeuralADMIXTURE(nn.Module):
-    """
-    Multi-head Neural ADMIXTURE.
-
-    A shared encoder produces a 64-dim representation that is independently
-    projected by H heads, each with its own K_h-dim bottleneck + decoder.
-    This allows simultaneous computation of cluster assignments for
-    multiple values of K in a single forward pass.
-
-    Parameters
-    ----------
-    n_snps : int
-        Number of input SNP features (M).
-    k_values : list of int
-        List of K values, one per head  (e.g. [2, 3, 4, 5, 6]).
-    hidden_dim : int
-        Encoder hidden dimension (default 64).
-    """
-
-    def __init__(
-        self, n_snps: int, k_values: List[int], hidden_dim: int = 64
-    ):
-        super().__init__()
-        self.n_snps = n_snps
-        self.k_values = k_values
-        self.n_heads = len(k_values)
-        self.hidden_dim = hidden_dim
-
-        self.encoder = Encoder(n_snps, hidden_dim)
-
-        self.bottlenecks = nn.ModuleList(
-            [BottleneckHead(hidden_dim, k) for k in k_values]
-        )
-        self.decoders = nn.ModuleList(
-            [Decoder(k, n_snps) for k in k_values]
-        )
-
-    def forward(
-        self, x: torch.Tensor, temperature: float = 1.0
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        """
-        Returns
-        -------
-        x_hats : list of (N, M) reconstructions, one per head
-        Qs     : list of (N, K_h) ancestry proportion matrices
-        """
-        h = self.encoder(x)
-
-        x_hats = []
-        qs = []
-        for bottleneck, decoder in zip(self.bottlenecks, self.decoders):
-            q = bottleneck(h, temperature)
-            x_hat = decoder(q)
-            qs.append(q)
-            x_hats.append(x_hat)
-
-        return x_hats, qs
-
-    def clamp_decoder_weights(self):
-        for decoder in self.decoders:
-            decoder.clamp_weights()
-
-    def get_F(self, head_idx: int) -> torch.Tensor:
-        return self.decoders[head_idx].F_matrix
-
-    def encode(
-        self, x: torch.Tensor, temperature: float = 1.0
-    ) -> List[torch.Tensor]:
-        """Inference-only: return list of Q matrices for new data."""
-        h = self.encoder(x)
-        return [bn(h, temperature) for bn in self.bottlenecks]
-
-    def init_decoder(self, head_idx: int, F_init: torch.Tensor):
-        """Initialize a specific head's decoder from a K×M matrix."""
-        k = self.k_values[head_idx]
-        assert F_init.shape == (k, self.n_snps), (
-            f"Head {head_idx}: expected ({k}, {self.n_snps}), got {F_init.shape}"
-        )
-        with torch.no_grad():
-            self.decoders[head_idx].linear.weight.copy_(F_init.T)
-            self.decoders[head_idx].clamp_weights()

@@ -4,15 +4,16 @@ Visualization utilities for Neural ADMIXTURE.
 Provides:
   - PCA scatter plots with learnt F-matrix centroids
   - Stacked bar plots for ancestry proportions (Q)
+  - Population-level ancestry heatmap
   - Training loss curves
-  - Multi-head Q comparison panels
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
 from sklearn.decomposition import PCA
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 
 # Consistent color palette for up to 12 clusters
@@ -112,7 +113,7 @@ def plot_pca_with_centroids(
 
 
 # ---------------------------------------------------------------------------
-# Stacked bar plot for Q
+# Stacked bar plot for Q (improved for large N)
 # ---------------------------------------------------------------------------
 
 def plot_admixture_barplot(
@@ -144,7 +145,7 @@ def plot_admixture_barplot(
     colors = _get_colors(K)
 
     if figsize is None:
-        figsize = (max(10, N * 0.02), 3)
+        figsize = (max(14, min(N * 0.015, 24)), 4.5)
 
     if sort_by_label and labels is not None:
         dominant = Q.argmax(axis=1)
@@ -169,7 +170,6 @@ def plot_admixture_barplot(
         ax.bar(
             x, Q_sorted[:, k_idx], bottom=bottom,
             width=1.0, color=colors[k_idx], edgecolor="none",
-            label=f"K={k_idx + 1}",
         )
         bottom += Q_sorted[:, k_idx]
 
@@ -182,7 +182,7 @@ def plot_admixture_barplot(
                 if prev_label is not None:
                     unique_labels.append(prev_label)
                     positions.append((start_pos + i - 1) / 2.0)
-                    ax.axvline(x=i - 0.5, color="black", linewidth=0.5)
+                    ax.axvline(x=i - 0.5, color="black", linewidth=0.8)
                 start_pos = i
                 prev_label = lab
         unique_labels.append(prev_label)
@@ -192,14 +192,20 @@ def plot_admixture_barplot(
             label_names[l] if label_names else str(l) for l in unique_labels
         ]
         ax.set_xticks(positions)
-        ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=7)
+        ax.set_xticklabels(tick_labels, fontsize=10, fontweight="bold")
     else:
         ax.set_xticks([])
 
+    patches = [mpatches.Patch(color=colors[k], label=f"Cluster {k+1}")
+               for k in range(K)]
+    ax.legend(handles=patches, loc="upper right", fontsize=8,
+              ncol=min(K, 6), framealpha=0.9, title="Ancestry")
+
     ax.set_xlim(-0.5, N - 0.5)
     ax.set_ylim(0, 1)
-    ax.set_ylabel("Ancestry fraction")
-    ax.set_title(title)
+    ax.set_ylabel("Ancestry fraction", fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.tick_params(axis="y", labelsize=9)
 
     fig.tight_layout()
     if show:
@@ -208,43 +214,66 @@ def plot_admixture_barplot(
 
 
 # ---------------------------------------------------------------------------
-# Multi-head Q comparison
+# Population-level ancestry heatmap
 # ---------------------------------------------------------------------------
 
-def plot_multihead_barplots(
-    Qs: List[np.ndarray],
-    k_values: List[int],
-    labels: Optional[np.ndarray] = None,
+def plot_ancestry_heatmap(
+    Q: np.ndarray,
+    labels: np.ndarray,
     label_names: Optional[Dict[int, str]] = None,
     figsize: Optional[Tuple[float, float]] = None,
-    suptitle: str = "Multi-head Ancestry Proportions",
+    title: str = "Mean Ancestry Proportions per Population",
 ) -> plt.Figure:
     """
-    Side-by-side stacked bar plots for each head in multi-head mode.
+    Heatmap showing mean ancestry proportions for each population.
+
+    Much cleaner than per-individual barplots for large sample sizes.
+    Rows = populations, columns = ancestry clusters, cell values = mean Q.
 
     Parameters
     ----------
-    Qs : list of (N, K_h) ancestry matrices, one per head.
-    k_values : list of K values corresponding to each head.
+    Q : (N, K) ancestry proportion matrix.
     labels : (N,) integer population labels.
     label_names : maps integer label -> display name.
     """
-    H = len(Qs)
-    N = Qs[0].shape[0]
+    K = Q.shape[1]
+    unique_labels = sorted(set(labels))
+    n_pops = len(unique_labels)
+
+    pop_names = [label_names[l] if label_names else str(l) for l in unique_labels]
+    mean_Q = np.zeros((n_pops, K))
+    pop_counts = np.zeros(n_pops, dtype=int)
+    for i, lab in enumerate(unique_labels):
+        mask = labels == lab
+        mean_Q[i] = Q[mask].mean(axis=0)
+        pop_counts[i] = mask.sum()
+
     if figsize is None:
-        figsize = (max(12, N * 0.02), 2.5 * H)
+        figsize = (max(6, K * 1.2), max(4, n_pops * 0.6))
 
-    fig, axes = plt.subplots(H, 1, figsize=figsize, sharex=True)
-    if H == 1:
-        axes = [axes]
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(mean_Q, aspect="auto", cmap="YlOrRd", vmin=0, vmax=1)
 
-    for i, (Q, k, ax) in enumerate(zip(Qs, k_values, axes)):
-        plot_admixture_barplot(
-            Q, labels=labels, label_names=label_names,
-            title=f"K = {k}", ax=ax,
-        )
+    for i in range(n_pops):
+        for j in range(K):
+            val = mean_Q[i, j]
+            color = "white" if val > 0.5 else "black"
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center",
+                    fontsize=10, color=color, fontweight="bold")
 
-    fig.suptitle(suptitle, fontsize=14, y=1.01)
+    ax.set_xticks(range(K))
+    ax.set_xticklabels([f"Cluster {k+1}" for k in range(K)], fontsize=10)
+    ax.set_yticks(range(n_pops))
+    ax.set_yticklabels(
+        [f"{name}  (n={pop_counts[i]})" for i, name in enumerate(pop_names)],
+        fontsize=10,
+    )
+    ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
+    ax.set_xlabel("Ancestry cluster", fontsize=11)
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    cbar.set_label("Mean ancestry fraction", fontsize=10)
+
     fig.tight_layout()
     plt.show()
     return fig
