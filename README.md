@@ -257,9 +257,9 @@ is arbitrary). Alignment is performed automatically via exhaustive search
 
 | Metric | Formula | Description |
 |---|---|---|
-| **RMSE(Q)** | $\frac{1}{\sqrt{NK}} \lVert \hat{Q} - Q_{gt} \rVert_F$ | Per-element RMS error of ancestry proportions |
-| **RMSE(F)** | $\frac{1}{\sqrt{KM}} \lVert \hat{F} - F_{gt} \rVert_F$ | Per-element RMS error of allele frequencies |
-| **Δ(Q)** | $\frac{1}{N^2} \lVert \hat{Q}\hat{Q}^T - Q_{gt}Q_{gt}^T \rVert_F^2$ | Permutation-invariant covariance agreement |
+| **RMSE(Q)** | $\frac{1}{\sqrt{NK}} \lVert \hat{Q} - Q_{gt} \rVert_F$ | Per-element RMS error of ancestry proportions (lower is better) |
+| **RMSE(F)** | $\frac{1}{\sqrt{KM}} \lVert \hat{F} - F_{gt} \rVert_F$ | Per-element RMS error of allele frequencies (lower is better) |
+| **Δ(Q)** | $\frac{1}{N^2} \lVert \hat{Q}\hat{Q}^T - Q_{gt}Q_{gt}^T \rVert_F^2$ | Permutation-invariant covariance agreement (lower is better) |
 | **Recon. loss** | $\text{BCE}(x, \tilde{x})$ | Binary cross-entropy (always available) |
 
 **Results on 1000 Genomes chr22 (K = 5, 50 epochs):**

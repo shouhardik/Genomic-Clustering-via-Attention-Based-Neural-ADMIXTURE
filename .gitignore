@@ -27,15 +27,3 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
-
-# Data (large files)
-data/
-*.bed
-*.bim
-*.fam
-*.vcf
-*.vcf.gz
-*.vcf.gz.tbi
-*.tbi
-*.ped
-*.map
